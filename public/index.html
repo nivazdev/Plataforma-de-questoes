@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Banco de Questões – Aprenda & Quiz</title>
+  <meta name="description" content="Um banco de questões completo. Navegue, gerencie e teste seus conhecimentos em diversas categorias." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ── SIDEBAR ──────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">🎓</span>
+      <span class="logo-text">QuizBanco</span>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-btn active" id="nav-dashboard" data-view="dashboard">
+        <span class="nav-icon">📊</span><span>Painel</span>
+      </button>
+      <button class="nav-btn" id="nav-questions" data-view="questions">
+        <span class="nav-icon">📚</span><span>Banco de Questões</span>
+      </button>
+      <button class="nav-btn" id="nav-quiz" data-view="quiz">
+        <span class="nav-icon">🧠</span><span>Fazer Quiz</span>
+      </button>
+      <button class="nav-btn" id="nav-add" data-view="add">
+        <span class="nav-icon">➕</span><span>Adicionar Questão</span>
+      </button>
+      <button class="nav-btn" id="nav-import" data-view="import">
+        <span class="nav-icon">📥</span><span>Importar PDF</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <span>Feito com ❤️ &amp; JS</span>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ─────────────────────────────────────────────────── -->
+  <div class="main-wrapper">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <button class="menu-toggle" id="menuToggle" aria-label="Alternar menu">☰</button>
+      <div class="topbar-title" id="topbarTitle">Painel</div>
+      <div class="topbar-actions">
+        <div class="search-wrap" id="searchWrap" style="display:none">
+          <input type="text" id="globalSearch" class="search-input" placeholder="Pesquisar questões…" autocomplete="off" />
+          <span class="search-icon">🔍</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── VIEW: PAINEL ─────────────────────────────────────────── -->
+    <main class="view" id="view-dashboard">
+      <div class="page-header">
+        <h1>Bem-vindo ao QuizBanco</h1>
+        <p>Sua plataforma pessoal de banco de questões &amp; quiz</p>
+      </div>
+
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card" id="statTotal">
+          <div class="stat-icon">📋</div>
+          <div class="stat-body">
+            <div class="stat-number" id="statTotalNum">—</div>
+            <div class="stat-label">Total de Questões</div>
+          </div>
+        </div>
+        <div class="stat-card accent-green">
+          <div class="stat-icon">✅</div>
+          <div class="stat-body">
+            <div class="stat-number" id="statEasy">—</div>
+            <div class="stat-label">Fácil</div>
+          </div>
+        </div>
+        <div class="stat-card accent-yellow">
+          <div class="stat-icon">⚡</div>
+          <div class="stat-body">
+            <div class="stat-number" id="statMedium">—</div>
+            <div class="stat-label">Médio</div>
+          </div>
+        </div>
+        <div class="stat-card accent-red">
+          <div class="stat-icon">🔥</div>
+          <div class="stat-body">
+            <div class="stat-number" id="statHard">—</div>
+            <div class="stat-label">Difícil</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="card" id="categoryBreakdown">
+          <div class="card-header">
+            <h2>Por Categoria</h2>
+          </div>
+          <div class="card-body" id="categoryBars">
+            <div class="loader">Carregando…</div>
+          </div>
+        </section>
+
+        <section class="card" id="quickActions">
+          <div class="card-header"><h2>Ações Rápidas</h2></div>
+          <div class="card-body quick-actions">
+            <button class="action-btn" id="quickQuiz">
+              <span class="action-icon">🧠</span>
+              <div>
+                <div class="action-title">Quiz Rápido</div>
+                <div class="action-sub">10 questões aleatórias</div>
+              </div>
+            </button>
+            <button class="action-btn" id="quickAdd">
+              <span class="action-icon">➕</span>
+              <div>
+                <div class="action-title">Adicionar Questão</div>
+                <div class="action-sub">Expanda o banco</div>
+              </div>
+            </button>
+            <button class="action-btn" id="quickBrowse">
+              <span class="action-icon">📚</span>
+              <div>
+                <div class="action-title">Ver Todas</div>
+                <div class="action-sub">Explorar banco de questões</div>
+              </div>
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- ── VIEW: BANCO DE QUESTÕES ──────────────────────────────── -->
+    <main class="view hidden" id="view-questions">
+      <div class="page-header">
+        <h1>Banco de Questões</h1>
+        <p>Navegue, filtre e gerencie todas as questões</p>
+      </div>
+      <div class="filter-bar">
+        <select id="filterCategory" class="filter-select">
+          <option value="all">Todas as Categorias</option>
+        </select>
+        <select id="filterDifficulty" class="filter-select">
+          <option value="all">Todas as Dificuldades</option>
+          <option value="Fácil">Fácil</option>
+          <option value="Médio">Médio</option>
+          <option value="Difícil">Difícil</option>
+        </select>
+        <select id="filterSource" class="filter-select">
+          <option value="all">Todas as Provas</option>
+        </select>
+        <span class="result-count" id="resultCount">0 questões</span>
+      </div>
+      <div class="questions-list" id="questionsList">
+        <div class="loader">Carregando…</div>
+      </div>
+    </main>
+
+    <!-- ── VIEW: QUIZ ───────────────────────────────────────────── -->
+    <main class="view hidden" id="view-quiz">
+      <!-- Configuração do Quiz -->
+      <div id="quizSetup">
+        <div class="page-header">
+          <h1>Fazer um Quiz</h1>
+          <p>Teste seus conhecimentos com questões aleatórias</p>
+        </div>
+        <div class="setup-card">
+          <div class="setup-field">
+            <label for="quizCategory">Disciplina</label>
+            <select id="quizCategory" class="filter-select">
+              <option value="all">Todas as Disciplinas</option>
+            </select>
+          </div>
+          <div class="setup-field">
+            <label for="quizSource">Prova / Ano</label>
+            <select id="quizSource" class="filter-select">
+              <option value="all">Todas as Provas</option>
+            </select>
+          </div>
+          <div class="setup-field">
+            <label for="quizDifficulty">Dificuldade</label>
+            <select id="quizDifficulty" class="filter-select">
+              <option value="all">Todas as Dificuldades</option>
+              <option value="Fácil">Fácil</option>
+              <option value="Médio">Médio</option>
+              <option value="Difícil">Difícil</option>
+            </select>
+          </div>
+          <div class="setup-field">
+            <label for="quizCount">Número de Questões</label>
+            <select id="quizCount" class="filter-select">
+              <option value="5">5 questões</option>
+              <option value="10" selected>10 questões</option>
+              <option value="15">15 questões</option>
+              <option value="20">20 questões</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-lg" id="startQuizBtn">Iniciar Quiz 🚀</button>
+        </div>
+      </div>
+
+      <!-- Quiz Ativo -->
+      <div id="quizActive" class="hidden">
+        <div class="quiz-header">
+          <div class="quiz-progress-wrap">
+            <span id="quizProgressText">Questão 1 de 10</span>
+            <div class="quiz-progress-bar"><div class="quiz-progress-fill" id="quizProgressFill"></div></div>
+          </div>
+          <div class="quiz-score-live">Pontuação: <span id="liveScore">0</span></div>
+        </div>
+
+        <div class="quiz-card" id="quizCard">
+          <div class="quiz-meta">
+            <span class="badge" id="qCategory">—</span>
+            <span class="badge badge-diff" id="qDifficulty">—</span>
+          </div>
+          <h2 class="quiz-question" id="quizQuestion">Texto da questão…</h2>
+          <div class="quiz-options" id="quizOptions"></div>
+          <div class="quiz-feedback hidden" id="quizFeedback"></div>
+          <button class="btn btn-primary" id="nextBtn" style="display:none">Próxima Questão →</button>
+        </div>
+      </div>
+
+      <!-- Resultados do Quiz -->
+      <div id="quizResults" class="hidden">
+        <div class="results-card">
+          <div class="results-emoji" id="resultsEmoji">🏆</div>
+          <h2 class="results-title" id="resultsTitle">Quiz Concluído!</h2>
+          <div class="results-score" id="resultsScore">—</div>
+          <div class="results-pct" id="resultsPct">—</div>
+          <div class="results-bar-wrap">
+            <div class="results-bar"><div class="results-bar-fill" id="resultsBarFill"></div></div>
+          </div>
+          <div class="results-breakdown" id="resultsBreakdown"></div>
+          <div class="results-actions">
+            <button class="btn btn-primary" id="retryQuizBtn">🔄 Tentar Novamente</button>
+            <button class="btn btn-secondary" id="newQuizBtn">Novo Quiz</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── VIEW: ADICIONAR / EDITAR QUESTÃO ────────────────────── -->
+    <main class="view hidden" id="view-add">
+      <div class="page-header">
+        <h1 id="formTitle">Adicionar Nova Questão</h1>
+        <p id="formSubtitle">Preencha os detalhes abaixo para adicionar ao banco</p>
+      </div>
+      <form class="question-form" id="questionForm" novalidate>
+        <input type="hidden" id="editId" />
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="fSource">Fonte / Prova *</label>
+            <input type="text" id="fSource" class="form-input" placeholder="ex: ENEM 2023, FUVEST 2022" required />
+          </div>
+          <div class="form-group">
+            <label for="fCategory">Disciplina *</label>
+            <input type="text" id="fCategory" class="form-input" placeholder="ex: Matemática" list="categoryList" required />
+            <datalist id="categoryList"></datalist>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="fDifficulty">Dificuldade *</label>
+            <select id="fDifficulty" class="form-input" required>
+              <option value="">Selecionar dificuldade</option>
+              <option value="Fácil">Fácil</option>
+              <option value="Médio">Médio</option>
+              <option value="Difícil">Difícil</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fQuestion">Texto de Apoio *</label>
+          <textarea id="fQuestion" class="form-input form-textarea" rows="3" placeholder="Digite o texto de apoio aqui…" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="fComandoQuestao">Comando da Questão *</label>
+          <textarea id="fComandoQuestao" class="form-input form-textarea" rows="2" placeholder="O que está sendo perguntado? (Aparecerá em negrito)" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Opções * <small>(clique no rádio para marcar como resposta correta)</small></label>
+          <div class="options-editor" id="optionsEditor">
+            <div class="option-row" id="optRow0">
+              <input type="radio" name="correctOption" id="opt-radio-0" value="0" class="opt-radio" />
+              <input type="text" id="opt-text-0" class="form-input opt-text" placeholder="Opção A" />
+              <button type="button" class="opt-del-btn" onclick="removeOption(0)" aria-label="Remover">✕</button>
+            </div>
+            <div class="option-row" id="optRow1">
+              <input type="radio" name="correctOption" id="opt-radio-1" value="1" class="opt-radio" />
+              <input type="text" id="opt-text-1" class="form-input opt-text" placeholder="Opção B" />
+              <button type="button" class="opt-del-btn" onclick="removeOption(1)" aria-label="Remover">✕</button>
+            </div>
+            <div class="option-row" id="optRow2">
+              <input type="radio" name="correctOption" id="opt-radio-2" value="2" class="opt-radio" />
+              <input type="text" id="opt-text-2" class="form-input opt-text" placeholder="Opção C" />
+              <button type="button" class="opt-del-btn" onclick="removeOption(2)" aria-label="Remover">✕</button>
+            </div>
+            <div class="option-row" id="optRow3">
+              <input type="radio" name="correctOption" id="opt-radio-3" value="3" class="opt-radio" />
+              <input type="text" id="opt-text-3" class="form-input opt-text" placeholder="Opção D" />
+              <button type="button" class="opt-del-btn" onclick="removeOption(3)" aria-label="Remover">✕</button>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="addOptionBtn">+ Adicionar Opção</button>
+        </div>
+
+        <div class="form-group">
+          <label for="fImageUrl">URL da Imagem <small>(opcional — cole o link direto da imagem)</small></label>
+          <input type="url" id="fImageUrl" class="form-input" placeholder="https://..." />
+        </div>
+
+        <div class="form-group">
+          <label for="fExplanation">Explicação <small>(opcional)</small></label>
+          <textarea id="fExplanation" class="form-input form-textarea" rows="2" placeholder="Explique por que a resposta está correta…"></textarea>
+        </div>
+
+        <div class="form-error hidden" id="formError"></div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-lg" id="formSubmitBtn">💾 Salvar Questão</button>
+          <button type="button" class="btn btn-secondary" id="formCancelBtn">Cancelar</button>
+        </div>
+      </form>
+    </main>
+
+    <!-- ── VIEW: IMPORTAR PDF ──────────────────────────────────── -->
+    <main class="view hidden" id="view-import">
+      <div class="page-header">
+        <h1>Importar Prova via PDF</h1>
+        <p>Envie o PDF da prova e do gabarito oficial para importar questões automaticamente</p>
+      </div>
+
+      <!-- Estado: formulário de upload -->
+      <div id="importIdle">
+        <form class="import-card" id="importForm">
+          <div class="form-group">
+            <label>PDF da Prova *</label>
+            <label class="upload-zone" for="importPdfFile" id="importPdfZone">
+              <span class="upload-zone-icon">📄</span>
+              <span class="upload-zone-text" id="importPdfLabel">Arraste ou clique para selecionar o PDF da prova</span>
+              <input type="file" id="importPdfFile" accept=".pdf" hidden />
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>PDF do Gabarito Oficial *</label>
+            <label class="upload-zone" for="importGabaritoFile" id="importGabaritoZone">
+              <span class="upload-zone-icon">📋</span>
+              <span class="upload-zone-text" id="importGabaritoLabel">Arraste ou clique para selecionar o PDF do gabarito</span>
+              <input type="file" id="importGabaritoFile" accept=".pdf" hidden />
+            </label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg import-submit-btn">🚀 Importar Prova</button>
+        </form>
+      </div>
+
+      <!-- Estado: carregando -->
+      <div id="importLoading" class="hidden">
+        <div class="import-loading-card">
+          <div class="import-spinner"></div>
+          <h2 class="import-loading-title">Processando PDFs…</h2>
+          <p class="import-loading-sub">Extraindo texto e analisando questões com IA.<br>Isso pode levar alguns minutos, por favor aguarde.</p>
+        </div>
+      </div>
+
+      <!-- Estado: resultado -->
+      <div id="importResult" class="hidden">
+        <div class="import-result-card" id="importResultCard">
+          <div class="import-result-icon" id="importResultIcon">✅</div>
+          <h2 class="import-result-title" id="importResultTitle">Importação Concluída!</h2>
+          <div class="import-result-details" id="importResultDetails"></div>
+          <div class="import-result-actions">
+            <button class="btn btn-primary" id="importAnotherBtn">📥 Importar Outra Prova</button>
+            <button class="btn btn-secondary" id="importGoQuestionsBtn">📚 Ver Questões</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── TOAST ─────────────────────────────────────────────────── -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- ── MODAL DE CONFIRMAÇÃO ──────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="confirmModal">
+    <div class="modal">
+      <div class="modal-icon">🗑️</div>
+      <h3 class="modal-title">Excluir Questão?</h3>
+      <p class="modal-msg">Esta ação não pode ser desfeita.</p>
+      <div class="modal-actions">
+        <button class="btn btn-danger" id="confirmDeleteBtn">Excluir</button>
+        <button class="btn btn-secondary" id="cancelDeleteBtn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
