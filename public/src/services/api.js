@@ -1,6 +1,8 @@
 import { showToast } from '../components/ui.js';
 import { supabase } from './supabaseClient.js';
 
+const API_BASE_URL = 'https://plataforma-de-questoes.onrender.com';
+
 function fromDB(row) {
   return {
     id: row.id,
@@ -135,7 +137,17 @@ export async function apiFetch(path, options = {}) {
     return { message: 'Excluído com sucesso' };
   }
 
-  throw new Error('Not implemented locally: ' + path);
+  // Se não foi interceptado pelos filtros acima (simulação Supabase),
+  // faz a chamada real para o backend na Render
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+  const response = await fetch(url, options);
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Erro na API: ${response.status}`);
+  }
+  
+  return response.json();
 }
 
 export async function deleteQuestion(id) {

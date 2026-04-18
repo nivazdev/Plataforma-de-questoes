@@ -1,5 +1,6 @@
 
 import { $, el, showToast } from '../components/ui.js';
+import { apiFetch } from '../services/api.js';
 
 let switchViewRef = null;
 
@@ -39,12 +40,10 @@ export function initImport(switchViewFn) {
       formData.append('pdf', pdfFile);
       formData.append('gabarito', gabaritoFile);
 
-      const res = await fetch('/api/import-pdf', {
+      const data = await apiFetch('/api/import-pdf', {
         method: 'POST',
         body: formData,
       });
-
-      const data = await res.json();
 
       // Switch to result state
       $('importLoading').classList.add('hidden');
