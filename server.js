@@ -47,37 +47,6 @@ function cleanJSON(str) {
   return str.slice(start, end + 1);
 }
 
-/**
- * Divide o texto em blocos com base em marcadores de questões (ex: "QUESTÃO 01").
- */
-function splitTextIntoQuestionChunks(text, questionsPerChunk = 50) {
-  const markerRegex = /(?:\n|^)\s*(?:QUESTÃO|Questão|QUESTION)\s*(\d+)/gi;
-  let match;
-  const indices = [];
-
-  while ((match = markerRegex.exec(text)) !== null) {
-    indices.push({ pos: match.index, num: parseInt(match[1]) });
-  }
-
-  if (indices.length === 0) return [text];
-
-  const chunks = [];
-  // Primeiro bloco: desde o início até o final do primeiro conjunto de questões
-  const firstSetEndIdx = Math.min(questionsPerChunk, indices.length);
-  const firstChunkEnd = (firstSetEndIdx < indices.length) ? indices[firstSetEndIdx].pos : text.length;
-  chunks.push(text.slice(0, firstChunkEnd));
-
-  // Blocos subsequentes
-  for (let i = questionsPerChunk; i < indices.length; i += questionsPerChunk) {
-    const start = indices[i].pos;
-    const nextIdx = i + questionsPerChunk;
-    const end = (nextIdx < indices.length) ? indices[nextIdx].pos : text.length;
-    chunks.push(text.slice(start, end));
-  }
-
-  return chunks;
-}
-
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
 async function callOpenRouter(messages, systemPrompt = '') {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -415,9 +384,16 @@ app.post('/api/import-pdf', upload.fields([
 
     console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
 
-    // ── 3. Dividir em blocos e enviar para Gemini ─────────────────────────────
-    const chunks = splitTextIntoQuestionChunks(pdfText, 50);
-    console.log(`  📦 Texto dividido em ${chunks.length} bloco(s) para extração.\n`);
+    // ── 3. Dividir em 3 blocos (por caracteres) e enviar para Gemini ──────────
+    const totalLen = pdfText.length;
+    const partSize = Math.ceil(totalLen / 3);
+    const chunks = [
+      pdfText.slice(0, partSize),
+      pdfText.slice(partSize, partSize * 2),
+      pdfText.slice(partSize * 2)
+    ];
+
+    console.log(`  📦 Texto dividido em ${chunks.length} bloco(s) de ~${partSize} chars para extração.\n`);
 
     let allExtractedQuestions = [];
     let year = null;
@@ -430,7 +406,7 @@ app.post('/api/import-pdf', upload.fields([
         [
           {
             role: 'user',
-            content: `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM:\n\n${chunks[i]}`,
+            content: `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
           }
         ],
         ENEM_EXTRACTION_SYSTEM_PROMPT
