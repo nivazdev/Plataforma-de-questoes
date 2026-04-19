@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-// const Anthropic = require('@anthropic-ai/sdk'); // Removido em favor de fetch nativo para OpenRouter
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -47,42 +47,17 @@ function cleanJSON(str) {
   return str.slice(start, end + 1);
 }
 
-// ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
-async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-001', maxTokens = null) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY deve estar definida no .env');
-
-  const body = {
-    model: model,
-    messages: [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      ...messages
-    ]
-  };
-
-  if (maxTokens) {
-    body.max_tokens = maxTokens;
-  }
-
-  console.log(`  🌐 Iniciando chamada ao OpenRouter (${model}${maxTokens ? `, max_tokens: ${maxTokens}` : ''})...`);
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'http://localhost:3000',
-      'X-Title': 'Plataforma de Questoes ENEM',
-    },
-    body: JSON.stringify(body)
+// ─── Gemini helper (SDK) ──────────────────────────────────────────────────────
+async function callGemini(prompt, systemPrompt = '') {
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+  const model = genAI.getGenerativeModel({ 
+    model: 'gemini-1.5-pro',
+    generationConfig: { maxOutputTokens: 8192 }
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error?.message || `Erro OpenRouter: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.choices[0]?.message?.content || '';
+  const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+  console.log(`  🌐 Iniciando chamada ao GeminiDirect...`);
+  const result = await model.generateContent(fullPrompt);
+  return result.response.text();
 }
 
 app.use(cors());
@@ -378,12 +353,10 @@ app.post('/api/import-pdf', upload.fields([
     console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
 
     console.log('  🤖 Enviando gabarito para Gemini para extração...');
-    const gabaritoRaw = await callOpenRouter([
-      {
-        role: 'user',
-        content: `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
-      }
-    ], '', 'google/gemini-2.0-flash-001');
+    const gabaritoRaw = await callGemini(
+      `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
+      ''
+    );
     let gabarito;
     try {
       gabarito = JSON.parse(cleanJSON(gabaritoRaw));
@@ -431,15 +404,9 @@ app.post('/api/import-pdf', upload.fields([
     for (let i = 0; i < chunks.length; i++) {
       console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Claude 3.5 Sonnet...`);
       
-      const rawResponse = await callOpenRouter(
-        [
-          {
-            role: 'user',
-            content: `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
-          }
-        ],
-        ENEM_EXTRACTION_SYSTEM_PROMPT,
-        'anthropic/claude-sonnet-4-5'
+      const rawResponse = await callGemini(
+        `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
+        ENEM_EXTRACTION_SYSTEM_PROMPT
       );
 
       try {
