@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const Anthropic = require('@anthropic-ai/sdk');
+// const Anthropic = require('@anthropic-ai/sdk'); // Removido em favor de fetch nativo para OpenRouter
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -36,15 +36,38 @@ function getSupabase() {
   return _supabase;
 }
 
-// ─── Anthropic client (lazy) ──────────────────────────────────────────────────
-let _anthropic = null;
-function getAnthropic() {
-  if (!_anthropic) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY deve estar definida no .env');
-    _anthropic = new Anthropic({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
+// ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
+async function callOpenRouter(messages, systemPrompt = '') {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY deve estar definida no .env');
+
+  const body = {
+    model: 'google/gemini-2.0-flash-001',
+    messages: [
+      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+      ...messages
+    ]
+  };
+
+  console.log('  🌐 Iniciando chamada ao OpenRouter (google/gemini-2.0-flash-001)...');
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'http://localhost:3000',
+      'X-Title': 'Plataforma de Questoes ENEM',
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error?.message || `Erro OpenRouter: ${response.status}`);
   }
-  return _anthropic;
+
+  const data = await response.json();
+  return data.choices[0]?.message?.content || '';
 }
 
 app.use(cors());
@@ -314,21 +337,13 @@ app.post('/api/import-pdf', upload.fields([
     }
     console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
 
-    console.log('  🤖 Enviando gabarito para Claude para extração...');
-    const anthropic = getAnthropic();
-
-    const gabaritoMessage = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
-        },
-      ],
-    });
-
-    const gabaritoRaw = gabaritoMessage.content[0]?.text || '';
+    console.log('  🤖 Enviando gabarito para Gemini para extração...');
+    const gabaritoRaw = await callOpenRouter([
+      {
+        role: 'user',
+        content: `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
+      }
+    ]);
     let gabarito;
     try {
       const cleaned = gabaritoRaw
@@ -337,7 +352,7 @@ app.post('/api/import-pdf', upload.fields([
         .trim();
       gabarito = JSON.parse(cleaned);
     } catch {
-      console.error('  ❌ Erro ao parsear gabarito do Claude:', gabaritoRaw.substring(0, 300));
+      console.error('  ❌ Erro ao parsear gabarito do Gemini:', gabaritoRaw.substring(0, 300));
       return res.status(500).json({
         success: false,
         error: 'Falha ao extrair gabarito do PDF. O Claude não retornou um JSON válido.',
@@ -362,23 +377,19 @@ app.post('/api/import-pdf', upload.fields([
 
     console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
 
-    // ── 3. Enviar para o Claude para extração estruturada ──────────────────────
-    console.log('  🤖 Enviando prova para Claude (claude-sonnet-4-6)... Isso pode demorar alguns minutos.');
+    console.log('  🤖 Enviando prova para Gemini (flash-thinking)... Isso pode demorar alguns minutos.');
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 64000,
-      system: ENEM_EXTRACTION_SYSTEM_PROMPT,
-      messages: [
+    const rawResponse = await callOpenRouter(
+      [
         {
           role: 'user',
           content: `Extraia todas as questões do seguinte texto bruto de prova do ENEM:\n\n${pdfText}`,
-        },
+        }
       ],
-    });
+      ENEM_EXTRACTION_SYSTEM_PROMPT
+    );
 
-    const rawResponse = message.content[0]?.text || '';
-    console.log(`  ✅ Resposta recebida do Claude (${rawResponse.length} chars)\n`);
+    console.log(`  ✅ Resposta recebida do Gemini (${rawResponse.length} chars)\n`);
 
     // ── 4. Parsear resposta ────────────────────────────────────────────────────
     let parsedData;
@@ -390,7 +401,7 @@ app.post('/api/import-pdf', upload.fields([
         .trim();
       parsedData = JSON.parse(cleaned);
     } catch (parseErr) {
-      console.error('  ❌ Erro ao parsear JSON do Claude:', parseErr.message);
+      console.error('  ❌ Erro ao parsear JSON do Gemini:', parseErr.message);
       return res.status(500).json({
         success: false,
         error: 'Falha ao parsear a resposta do Claude como JSON.',
