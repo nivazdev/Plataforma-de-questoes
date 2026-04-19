@@ -48,19 +48,19 @@ function cleanJSON(str) {
 }
 
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
-async function callOpenRouter(messages, systemPrompt = '') {
+async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-exp:free') {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY deve estar definida no .env');
 
   const body = {
-    model: 'google/gemini-2.0-flash-001',
+    model: model,
     messages: [
       ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
       ...messages
     ]
   };
 
-  console.log('  🌐 Iniciando chamada ao OpenRouter (google/gemini-2.0-flash-001)...');
+  console.log(`  🌐 Iniciando chamada ao OpenRouter (${model})...`);
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -379,7 +379,7 @@ app.post('/api/import-pdf', upload.fields([
         role: 'user',
         content: `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
       }
-    ]);
+    ], '', 'google/gemini-2.0-flash-exp:free');
     let gabarito;
     try {
       gabarito = JSON.parse(cleanJSON(gabaritoRaw));
@@ -425,7 +425,7 @@ app.post('/api/import-pdf', upload.fields([
     let caderno = null;
 
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length}...`);
+      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Claude 3.5 Sonnet...`);
       
       const rawResponse = await callOpenRouter(
         [
@@ -434,7 +434,8 @@ app.post('/api/import-pdf', upload.fields([
             content: `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
           }
         ],
-        ENEM_EXTRACTION_SYSTEM_PROMPT
+        ENEM_EXTRACTION_SYSTEM_PROMPT,
+        'anthropic/claude-3.5-sonnet'
       );
 
       try {
