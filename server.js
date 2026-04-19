@@ -48,7 +48,7 @@ function cleanJSON(str) {
 }
 
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
-async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-exp:free') {
+async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-001') {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY deve estar definida no .env');
 
@@ -379,7 +379,7 @@ app.post('/api/import-pdf', upload.fields([
         role: 'user',
         content: `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
       }
-    ], '', 'google/gemini-2.0-flash-exp:free');
+    ], '', 'google/gemini-2.0-flash-001');
     let gabarito;
     try {
       gabarito = JSON.parse(cleanJSON(gabaritoRaw));
