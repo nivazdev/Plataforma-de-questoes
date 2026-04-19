@@ -1,7 +1,7 @@
 import { showToast } from '../components/ui.js';
 import { supabase } from './supabaseClient.js';
 
-const API_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = 'https://plataforma-de-questoes.onrender.com';
 
 function fromDB(row) {
   return {
