@@ -89,6 +89,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Questões reais — verificar gabaritos oficiais em: https://enem.inep.gov.br/
 let questions = [];
 
+// ─── Store de tarefas de importação (em memória) ──────────────────────────────
+const importJobs = {};
+
 // ─── Auxiliares ───────────────────────────────────────────────────────────────
 const getCategories = () => [...new Set(questions.map(q => q.category))].sort();
 const getSources = () => [...new Set(questions.map(q => q.source))].sort((a, b) => {
@@ -158,6 +161,12 @@ app.delete('/api/questions/:id', (req, res) => {
 
 app.get('/api/categories', (req, res) => res.json(getCategories()));
 app.get('/api/sources', (req, res) => res.json(getSources()));
+
+app.get('/api/import-status/:id', (req, res) => {
+  const job = importJobs[req.params.id];
+  if (!job) return res.status(404).json({ error: 'Tarefa não encontrada' });
+  res.json(job);
+});
 
 app.get('/api/quiz', (req, res) => {
   const { category, difficulty, source, count = 10 } = req.query;
@@ -318,19 +327,35 @@ app.post('/api/import-pdf', upload.fields([
   { name: 'pdf', maxCount: 1 },
   { name: 'gabarito', maxCount: 1 },
 ]), async (req, res) => {
-  const startTime = Date.now();
+  // 1. Aumentar timeouts (5 minutos)
+  req.setTimeout(300000);
+  res.setTimeout(300000);
 
-  try {
-    // ── 1. Validar inputs ──────────────────────────────────────────────────────
-    const pdfFile = req.files?.pdf?.[0];
-    const gabaritoFile = req.files?.gabarito?.[0];
+  const jobId = uuidv4();
+  const pdfFile = req.files?.pdf?.[0];
+  const gabaritoFile = req.files?.gabarito?.[0];
 
-    if (!pdfFile) {
-      return res.status(400).json({ success: false, error: 'Arquivo PDF da prova é obrigatório (campo "pdf")' });
-    }
-    if (!gabaritoFile) {
-      return res.status(400).json({ success: false, error: 'Arquivo PDF do gabarito é obrigatório (campo "gabarito")' });
-    }
+  if (!pdfFile || !gabaritoFile) {
+    return res.status(400).json({ success: false, error: 'Arquivos PDF e Gabarito são obrigatórios' });
+  }
+
+  // Inicializa job
+  importJobs[jobId] = {
+    id: jobId,
+    status: 'processing',
+    progress: 0,
+    startTime: Date.now(),
+    success: false
+  };
+
+  // Responde imediatamente com 202 Accepted
+  res.status(202).json({ success: true, jobId, message: 'Processamento iniciado em segundo plano' });
+
+  // Inicia processamento em background (async)
+  (async () => {
+    const startTime = Date.now();
+    try {
+      console.log(`\n🚀 [Job ${jobId}] Iniciando processamento background...`);
 
     console.log('\n📄 ═══════════════════════════════════════════════════════');
     console.log('   IMPORTAÇÃO DE PDF INICIADA');
@@ -344,7 +369,7 @@ app.post('/api/import-pdf', upload.fields([
     const gabaritoText = gabaritoData.text;
 
     if (!gabaritoText || gabaritoText.trim().length < 10) {
-      return res.status(400).json({ success: false, error: 'PDF do gabarito parece estar vazio ou conter muito pouco texto.' });
+      throw new Error('PDF do gabarito parece estar vazio ou conter muito pouco texto.');
     }
     console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
 
@@ -368,7 +393,7 @@ app.post('/api/import-pdf', upload.fields([
     }
 
     if (typeof gabarito !== 'object' || Array.isArray(gabarito) || Object.keys(gabarito).length === 0) {
-      return res.status(500).json({ success: false, error: 'Gabarito extraído está vazio ou em formato inválido.' });
+      throw new Error('Gabarito extraído está vazio ou em formato inválido.');
     }
 
     console.log(`  ✅ Gabarito extraído: ${Object.keys(gabarito).length} respostas\n`);
@@ -379,7 +404,7 @@ app.post('/api/import-pdf', upload.fields([
     const pdfText = pdfData.text;
 
     if (!pdfText || pdfText.trim().length < 100) {
-      return res.status(400).json({ success: false, error: 'PDF parece estar vazio ou conter muito pouco texto.' });
+      throw new Error('PDF parece estar vazio ou conter muito pouco texto.');
     }
 
     console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
@@ -428,10 +453,7 @@ app.post('/api/import-pdf', upload.fields([
     }
 
     if (allExtractedQuestions.length === 0) {
-      return res.status(500).json({
-        success: false,
-        error: 'Não foi possível extrair nenhuma questão da prova.',
-      });
+      throw new Error('Não foi possível extrair nenhuma questão da prova.');
     }
 
     const extractedQuestions = allExtractedQuestions;
@@ -483,22 +505,27 @@ app.post('/api/import-pdf', upload.fields([
     console.log(`     Importadas: ${imported} | Puladas: ${skipped} | Erros: ${errors.length}`);
     console.log('═══════════════════════════════════════════════════════\n');
 
-    // ── 7. Resposta ────────────────────────────────────────────────────────────
-    return res.json({
+    // ── 7. Finalizar Job ───────────────────────────────────────────────────────
+    importJobs[jobId] = {
+      ...importJobs[jobId],
+      status: 'completed',
       success: true,
       imported,
       skipped,
       year,
       caderno,
       errors,
-    });
+      elapsedTime: elapsed
+    };
   } catch (err) {
-    console.error('  ❌ Erro fatal na importação:', err);
-    return res.status(500).json({
-      success: false,
-      error: err.message || 'Erro interno no servidor',
-    });
+    console.error(`  ❌ [Job ${jobId}] Erro fatal:`, err);
+    importJobs[jobId] = {
+      ...importJobs[jobId],
+      status: 'failed',
+      error: err.message || 'Erro interno no servidor'
+    };
   }
+})();
 });
 
 // ─── Catch-all (deve ser a ÚLTIMA rota) ───────────────────────────────────────

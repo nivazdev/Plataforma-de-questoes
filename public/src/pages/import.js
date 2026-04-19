@@ -45,34 +45,14 @@ export function initImport(switchViewFn) {
         body: formData,
       });
 
-      // Switch to result state
-      $('importLoading').classList.add('hidden');
-      $('importResult').classList.remove('hidden');
-
-      if (data.success) {
-        $('importResultIcon').textContent = '✅';
-        $('importResultTitle').textContent = 'Importação Concluída!';
-        $('importResultDetails').innerHTML = buildSuccessHTML(data);
-        $('importResultCard').classList.remove('error');
-        $('importResultCard').classList.add('success');
-        showToast(`${data.imported} questões importadas 🎉`);
+      if (data.success && data.jobId) {
+        showToast('Processamento iniciado...');
+        handleJobPolling(data.jobId);
       } else {
-        $('importResultIcon').textContent = '❌';
-        $('importResultTitle').textContent = 'Erro na Importação';
-        $('importResultDetails').innerHTML = `<p class="import-error-msg">${escHtml(data.error || 'Erro desconhecido')}</p>`;
-        $('importResultCard').classList.remove('success');
-        $('importResultCard').classList.add('error');
-        showToast('Erro na importação', 'error');
+        throw new Error(data.error || 'Erro ao iniciar importação');
       }
     } catch (err) {
-      $('importLoading').classList.add('hidden');
-      $('importResult').classList.remove('hidden');
-      $('importResultIcon').textContent = '❌';
-      $('importResultTitle').textContent = 'Erro de Conexão';
-      $('importResultDetails').innerHTML = `<p class="import-error-msg">${escHtml(err.message)}</p>`;
-      $('importResultCard').classList.remove('success');
-      $('importResultCard').classList.add('error');
-      showToast('Falha na conexão com o servidor', 'error');
+      showImportError(err.message);
     }
   });
 
@@ -85,6 +65,45 @@ export function initImport(switchViewFn) {
   $('importGoQuestionsBtn').addEventListener('click', () => {
     if (switchViewRef) switchViewRef('questions');
   });
+}
+
+async function handleJobPolling(jobId) {
+  try {
+    const job = await apiFetch(`/api/import-status/${jobId}`);
+    
+    if (job.status === 'completed') {
+      showImportSuccess(job);
+    } else if (job.status === 'failed') {
+      showImportError(job.error || 'Erro no processamento');
+    } else {
+      // Continua processando, tenta novamente em 3s
+      setTimeout(() => handleJobPolling(jobId), 3000);
+    }
+  } catch (err) {
+    showImportError('Erro ao consultar status da importação');
+  }
+}
+
+function showImportSuccess(data) {
+  $('importLoading').classList.add('hidden');
+  $('importResult').classList.remove('hidden');
+  $('importResultIcon').textContent = '✅';
+  $('importResultTitle').textContent = 'Importação Concluída!';
+  $('importResultDetails').innerHTML = buildSuccessHTML(data);
+  $('importResultCard').classList.remove('error');
+  $('importResultCard').classList.add('success');
+  showToast(`${data.imported} questões importadas 🎉`);
+}
+
+function showImportError(msg) {
+  $('importLoading').classList.add('hidden');
+  $('importResult').classList.remove('hidden');
+  $('importResultIcon').textContent = '❌';
+  $('importResultTitle').textContent = 'Erro na Importação';
+  $('importResultDetails').innerHTML = `<p class="import-error-msg">${escHtml(msg)}</p>`;
+  $('importResultCard').classList.remove('success');
+  $('importResultCard').classList.add('error');
+  showToast(msg, 'error');
 }
 
 export function initImportView() {
