@@ -48,7 +48,7 @@ function cleanJSON(str) {
 }
 
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
-async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-001') {
+async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemini-2.0-flash-001', maxTokens = null) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY deve estar definida no .env');
 
@@ -60,7 +60,11 @@ async function callOpenRouter(messages, systemPrompt = '', model = 'google/gemin
     ]
   };
 
-  console.log(`  🌐 Iniciando chamada ao OpenRouter (${model})...`);
+  if (maxTokens) {
+    body.max_tokens = maxTokens;
+  }
+
+  console.log(`  🌐 Iniciando chamada ao OpenRouter (${model}${maxTokens ? `, max_tokens: ${maxTokens}` : ''})...`);
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
