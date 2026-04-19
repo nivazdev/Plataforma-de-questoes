@@ -435,7 +435,7 @@ app.post('/api/import-pdf', upload.fields([
           }
         ],
         ENEM_EXTRACTION_SYSTEM_PROMPT,
-        'anthropic/claude-3.5-sonnet'
+        'anthropic/claude-sonnet-4-5'
       );
 
       try {
