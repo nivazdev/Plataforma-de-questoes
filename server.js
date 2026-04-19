@@ -36,6 +36,17 @@ function getSupabase() {
   return _supabase;
 }
 
+/**
+ * Limpa o JSON removendo blocos markdown e textos extras.
+ */
+function cleanJSON(str) {
+  str = str.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+  const start = str.indexOf('{');
+  const end = str.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('JSON não encontrado na resposta');
+  return str.slice(start, end + 1);
+}
+
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
 async function callOpenRouter(messages, systemPrompt = '') {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -346,11 +357,7 @@ app.post('/api/import-pdf', upload.fields([
     ]);
     let gabarito;
     try {
-      const cleaned = gabaritoRaw
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-      gabarito = JSON.parse(cleaned);
+      gabarito = JSON.parse(cleanJSON(gabaritoRaw));
     } catch {
       console.error('  ❌ Erro ao parsear gabarito do Gemini:', gabaritoRaw.substring(0, 300));
       return res.status(500).json({
@@ -394,12 +401,7 @@ app.post('/api/import-pdf', upload.fields([
     // ── 4. Parsear resposta ────────────────────────────────────────────────────
     let parsedData;
     try {
-      // Remove possíveis blocos de código markdown que o modelo pode incluir
-      const cleaned = rawResponse
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-      parsedData = JSON.parse(cleaned);
+      parsedData = JSON.parse(cleanJSON(rawResponse));
     } catch (parseErr) {
       console.error('  ❌ Erro ao parsear JSON do Gemini:', parseErr.message);
       return res.status(500).json({
