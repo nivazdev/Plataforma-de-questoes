@@ -51,7 +51,7 @@ function cleanJSON(str) {
 async function callGemini(prompt, systemPrompt = '') {
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
   const model = genAI.getGenerativeModel({ 
-    model: 'gemini-1.5-pro',
+    model: 'gemini-2.0-flash',
     generationConfig: { maxOutputTokens: 8192 }
   });
   const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
