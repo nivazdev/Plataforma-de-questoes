@@ -47,6 +47,37 @@ function cleanJSON(str) {
   return str.slice(start, end + 1);
 }
 
+/**
+ * Divide o texto em blocos com base em marcadores de questões (ex: "QUESTÃO 01").
+ */
+function splitTextIntoQuestionChunks(text, questionsPerChunk = 50) {
+  const markerRegex = /(?:\n|^)\s*(?:QUESTÃO|Questão|QUESTION)\s*(\d+)/gi;
+  let match;
+  const indices = [];
+
+  while ((match = markerRegex.exec(text)) !== null) {
+    indices.push({ pos: match.index, num: parseInt(match[1]) });
+  }
+
+  if (indices.length === 0) return [text];
+
+  const chunks = [];
+  // Primeiro bloco: desde o início até o final do primeiro conjunto de questões
+  const firstSetEndIdx = Math.min(questionsPerChunk, indices.length);
+  const firstChunkEnd = (firstSetEndIdx < indices.length) ? indices[firstSetEndIdx].pos : text.length;
+  chunks.push(text.slice(0, firstChunkEnd));
+
+  // Blocos subsequentes
+  for (let i = questionsPerChunk; i < indices.length; i += questionsPerChunk) {
+    const start = indices[i].pos;
+    const nextIdx = i + questionsPerChunk;
+    const end = (nextIdx < indices.length) ? indices[nextIdx].pos : text.length;
+    chunks.push(text.slice(start, end));
+  }
+
+  return chunks;
+}
+
 // ─── OpenRouter helper (fetch) ────────────────────────────────────────────────
 async function callOpenRouter(messages, systemPrompt = '') {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -384,43 +415,50 @@ app.post('/api/import-pdf', upload.fields([
 
     console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
 
-    console.log('  🤖 Enviando prova para Gemini (flash-thinking)... Isso pode demorar alguns minutos.');
+    // ── 3. Dividir em blocos e enviar para Gemini ─────────────────────────────
+    const chunks = splitTextIntoQuestionChunks(pdfText, 50);
+    console.log(`  📦 Texto dividido em ${chunks.length} bloco(s) para extração.\n`);
 
-    const rawResponse = await callOpenRouter(
-      [
-        {
-          role: 'user',
-          content: `Extraia todas as questões do seguinte texto bruto de prova do ENEM:\n\n${pdfText}`,
+    let allExtractedQuestions = [];
+    let year = null;
+    let caderno = null;
+
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length}...`);
+      
+      const rawResponse = await callOpenRouter(
+        [
+          {
+            role: 'user',
+            content: `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM:\n\n${chunks[i]}`,
+          }
+        ],
+        ENEM_EXTRACTION_SYSTEM_PROMPT
+      );
+
+      try {
+        const parsedData = JSON.parse(cleanJSON(rawResponse));
+        if (parsedData.questions && Array.isArray(parsedData.questions)) {
+          allExtractedQuestions = allExtractedQuestions.concat(parsedData.questions);
+          // Captura metadados do primeiro bloco que contiver
+          if (!year) year = parsedData.year;
+          if (!caderno) caderno = parsedData.caderno;
+          console.log(`     ✅ Bloco ${i + 1}: ${parsedData.questions.length} questões extraídas.`);
         }
-      ],
-      ENEM_EXTRACTION_SYSTEM_PROMPT
-    );
+      } catch (parseErr) {
+        console.error(`  ❌ Erro ao parsear bloco ${i + 1}:`, parseErr.message);
+        // Continua para o próximo bloco mesmo se um falhar
+      }
+    }
 
-    console.log(`  ✅ Resposta recebida do Gemini (${rawResponse.length} chars)\n`);
-
-    // ── 4. Parsear resposta ────────────────────────────────────────────────────
-    let parsedData;
-    try {
-      parsedData = JSON.parse(cleanJSON(rawResponse));
-    } catch (parseErr) {
-      console.error('  ❌ Erro ao parsear JSON do Gemini:', parseErr.message);
+    if (allExtractedQuestions.length === 0) {
       return res.status(500).json({
         success: false,
-        error: 'Falha ao parsear a resposta do Claude como JSON.',
-        rawPreview: rawResponse.substring(0, 500),
+        error: 'Não foi possível extrair nenhuma questão da prova.',
       });
     }
 
-    if (!parsedData.questions || !Array.isArray(parsedData.questions) || parsedData.questions.length === 0) {
-      return res.status(500).json({
-        success: false,
-        error: 'Claude não retornou nenhuma questão na resposta.',
-      });
-    }
-
-    const year = parsedData.year || null;
-    const caderno = parsedData.caderno || null;
-    const extractedQuestions = parsedData.questions;
+    const extractedQuestions = allExtractedQuestions;
 
     console.log(`  📋 Questões extraídas: ${extractedQuestions.length}`);
     console.log(`  📅 Ano: ${year} | Caderno: ${caderno}\n`);
