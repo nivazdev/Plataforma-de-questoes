@@ -6,7 +6,6 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -47,17 +46,37 @@ function cleanJSON(str) {
   return str.slice(start, end + 1);
 }
 
-// ─── Gemini helper (SDK) ──────────────────────────────────────────────────────
-async function callGemini(prompt, systemPrompt = '') {
-  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.0-flash',
-    generationConfig: { maxOutputTokens: 8192 }
+// ─── Anthropic helper (Fetch direto) ──────────────────────────────────────────
+async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no .env');
+  
+  console.log(`  🌐 Iniciando chamada à API da Anthropic (claude-haiku-4-5)...`);
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5',
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [
+        { role: 'user', content: prompt }
+      ]
+    })
   });
-  const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-  console.log(`  🌐 Iniciando chamada ao GeminiDirect...`);
-  const result = await model.generateContent(fullPrompt);
-  return result.response.text();
+  
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Erro na API Anthropic: ${response.status} - ${errText}`);
+  }
+  
+  const data = await response.json();
+  return data.content[0].text;
 }
 
 app.use(cors());
@@ -352,16 +371,17 @@ app.post('/api/import-pdf', upload.fields([
     }
     console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
 
-    console.log('  🤖 Enviando gabarito para Gemini para extração...');
-    const gabaritoRaw = await callGemini(
+    console.log('  🤖 Enviando gabarito para Anthropic para extração...');
+    const gabaritoRaw = await callAnthropic(
       `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
-      ''
+      '',
+      500
     );
     let gabarito;
     try {
       gabarito = JSON.parse(cleanJSON(gabaritoRaw));
     } catch {
-      console.error('  ❌ Erro ao parsear gabarito do Gemini:', gabaritoRaw.substring(0, 300));
+      console.error('  ❌ Erro ao parsear gabarito:', gabaritoRaw.substring(0, 300));
       return res.status(500).json({
         success: false,
         error: 'Falha ao extrair gabarito do PDF. O Claude não retornou um JSON válido.',
@@ -386,14 +406,13 @@ app.post('/api/import-pdf', upload.fields([
 
     console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
 
-    // ── 3. Dividir em 3 blocos (por caracteres) e enviar para Gemini ──────────
+    // ── 3. Dividir em 6 blocos (por caracteres) e enviar para Anthropic ────────
     const totalLen = pdfText.length;
-    const partSize = Math.ceil(totalLen / 3);
-    const chunks = [
-      pdfText.slice(0, partSize),
-      pdfText.slice(partSize, partSize * 2),
-      pdfText.slice(partSize * 2)
-    ];
+    const partSize = Math.ceil(totalLen / 6);
+    const chunks = [];
+    for (let i = 0; i < 6; i++) {
+      chunks.push(pdfText.slice(partSize * i, partSize * (i + 1)));
+    }
 
     console.log(`  📦 Texto dividido em ${chunks.length} bloco(s) de ~${partSize} chars para extração.\n`);
 
@@ -402,11 +421,12 @@ app.post('/api/import-pdf', upload.fields([
     let caderno = null;
 
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Claude 3.5 Sonnet...`);
+      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Anthropic (Claude)...`);
       
-      const rawResponse = await callGemini(
+      const rawResponse = await callAnthropic(
         `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
-        ENEM_EXTRACTION_SYSTEM_PROMPT
+        ENEM_EXTRACTION_SYSTEM_PROMPT,
+        4000
       );
 
       try {
