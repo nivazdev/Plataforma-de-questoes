@@ -48,35 +48,34 @@ function cleanJSON(str) {
 
 // ─── Anthropic helper (Fetch direto) ──────────────────────────────────────────
 async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurada no .env');
-  
-  console.log(`  🌐 Iniciando chamada à API da Anthropic (claude-haiku-4-5)...`);
-  
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY não configurada no .env');
+
+  console.log(`  🌐 Iniciando chamada à API do OpenRouter (gemini-2.0-flash)...`);
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json'
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5',
+      model: 'google/gemini-2.0-flash-exp:free',
       max_tokens: maxTokens,
-      system: systemPrompt,
       messages: [
+        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
         { role: 'user', content: prompt }
       ]
     })
   });
-  
+
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Erro na API Anthropic: ${response.status} - ${errText}`);
+    throw new Error(`Erro na API OpenRouter: ${response.status} - ${errText}`);
   }
-  
+
   const data = await response.json();
-  return data.content[0].text;
+  return data.choices[0].message.content;
 }
 
 app.use(cors());
