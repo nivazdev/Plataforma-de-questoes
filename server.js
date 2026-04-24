@@ -420,7 +420,8 @@ app.post('/api/import-pdf', upload.fields([
     let caderno = null;
 
     for (let i = 0; i < chunks.length; i++) {
-      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Anthropic (Claude)...`);
+      await new Promise(r => setTimeout(r, 10000));
+      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Google (Gemini)...`);
       
       const rawResponse = await callAnthropic(
         `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
