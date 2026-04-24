@@ -51,7 +51,7 @@ async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_API_KEY não configurada no .env');
 
-  console.log(`  🌐 Iniciando chamada à API do Google (gemini-2.0-flash-lite)...`);
+  console.log(`  🌐 Iniciando chamada à API do Google (gemini-2.0-flash)...`);
 
   const response = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
     method: 'POST',
@@ -60,7 +60,7 @@ async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'gemini-2.0-flash-lite',
+      model: 'gemini-2.0-flash',
       max_tokens: maxTokens,
       messages: [
         ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
