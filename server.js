@@ -60,7 +60,7 @@ async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.0-flash-exp:free',
+      model: 'google/gemini-2.5-flash-preview:free',
       max_tokens: maxTokens,
       messages: [
         ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
