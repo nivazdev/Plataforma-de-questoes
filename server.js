@@ -48,19 +48,19 @@ function cleanJSON(str) {
 
 // ─── Anthropic helper (Fetch direto) ──────────────────────────────────────────
 async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY não configurada no .env');
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_API_KEY não configurada no .env');
 
-  console.log(`  🌐 Iniciando chamada à API do OpenRouter (gemini-2.0-flash)...`);
+  console.log(`  🌐 Iniciando chamada à API do Google (gemini-2.0-flash-lite)...`);
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      model: 'gemini-2.0-flash-lite',
       max_tokens: maxTokens,
       messages: [
         ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
@@ -71,7 +71,7 @@ async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Erro na API OpenRouter: ${response.status} - ${errText}`);
+    throw new Error(`Erro na API Google: ${response.status} - ${errText}`);
   }
 
   const data = await response.json();
@@ -407,9 +407,9 @@ app.post('/api/import-pdf', upload.fields([
 
     // ── 3. Dividir em 6 blocos (por caracteres) e enviar para Anthropic ────────
     const totalLen = pdfText.length;
-    const partSize = Math.ceil(totalLen / 6);
+    const partSize = Math.ceil(totalLen / 10);
     const chunks = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 10; i++) {
       chunks.push(pdfText.slice(partSize * i, partSize * (i + 1)));
     }
 
