@@ -46,36 +46,53 @@ function cleanJSON(str) {
   return str.slice(start, end + 1);
 }
 
-// ─── Anthropic helper (Fetch direto) ──────────────────────────────────────────
+// ─── OpenRouter helper com retry automático ───────────────────────────────────
 async function callAnthropic(prompt, systemPrompt = '', maxTokens = 4000) {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) throw new Error('GOOGLE_API_KEY não configurada no .env');
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY não configurada no .env');
 
-  console.log(`  🌐 Iniciando chamada à API do Google (gemini-2.0-flash)...`);
+  const MAX_RETRIES = 5;
+  const BASE_DELAY = 30000; // 30 segundos
 
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gemini-2.0-flash',
-      max_tokens: maxTokens,
-      messages: [
-        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-        { role: 'user', content: prompt }
-      ]
-    })
-  });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    console.log(`  🌐 Chamada à API OpenRouter (llama-3.3-70b) — tentativa ${attempt}/${MAX_RETRIES}...`);
 
-  if (!response.ok) {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-3.3-70b-instruct:free',
+        max_tokens: maxTokens,
+        messages: [
+          ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.choices[0].message.content;
+    }
+
     const errText = await response.text();
-    throw new Error(`Erro na API Google: ${response.status} - ${errText}`);
+
+    // Se for rate limit (429), espera e tenta de novo
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const waitTime = BASE_DELAY * attempt; // 30s, 60s, 90s, 120s
+      console.log(`  ⏳ Rate limit atingido. Aguardando ${waitTime / 1000}s antes de tentar novamente...`);
+      await new Promise(r => setTimeout(r, waitTime));
+      continue;
+    }
+
+    // Qualquer outro erro, lança imediatamente
+    throw new Error(`Erro na API OpenRouter: ${response.status} - ${errText}`);
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  throw new Error('Número máximo de tentativas atingido. Tente novamente mais tarde.');
 }
 
 app.use(cors());
@@ -83,7 +100,6 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Banco de Questões ENEM / Vestibulares ────────────────────────────────────
-// Questões reais — verificar gabaritos oficiais em: https://enem.inep.gov.br/
 let questions = [];
 
 // ─── Store de tarefas de importação (em memória) ──────────────────────────────
@@ -94,7 +110,7 @@ const getCategories = () => [...new Set(questions.map(q => q.category))].sort();
 const getSources = () => [...new Set(questions.map(q => q.source))].sort((a, b) => {
   const ya = parseInt(a.match(/\d{4}/)?.[0] || '0');
   const yb = parseInt(b.match(/\d{4}/)?.[0] || '0');
-  return yb - ya; // mais recente primeiro
+  return yb - ya;
 });
 
 // ─── Rotas ────────────────────────────────────────────────────────────────────
@@ -196,18 +212,14 @@ app.get('/api/stats', (req, res) => {
   questions.forEach(q => {
     byCategory[q.category] = (byCategory[q.category] || 0) + 1;
     if (byDifficulty[q.difficulty] !== undefined) byDifficulty[q.difficulty]++;
-    const exam = (q.source || '').split(' ')[0]; // "ENEM" ou "FUVEST"
+    const exam = (q.source || '').split(' ')[0];
     bySource[exam] = (bySource[exam] || 0) + 1;
   });
   res.json({ total: questions.length, byCategory, byDifficulty, bySource });
 });
 
-// ─── Importação de PDF (ENEM e extensível para outras bancas) ─────────────────
+// ─── Importação de PDF ────────────────────────────────────────────────────────
 
-/**
- * System prompt para extração de questões do ENEM.
- * Isolado em constante para facilitar extensão futura (ex: FUVEST, UNICAMP).
- */
 const ENEM_EXTRACTION_SYSTEM_PROMPT = `Você é um especialista em extração de questões do ENEM.
 
 Receberá o texto bruto de uma prova do ENEM. Extraia TODAS as questões e retorne APENAS um JSON válido, sem markdown, sem explicações, sem blocos de código.
@@ -274,20 +286,12 @@ Formato de saída:
   ]
 }`;
 
-/**
- * Mapeia letra de gabarito (A–E) para índice numérico.
- */
 const LETTER_TO_INDEX = { A: 0, B: 1, C: 2, D: 3, E: 4 };
 
-/**
- * Insere registros no Supabase em lotes de `batchSize`.
- * Retorna { imported, errors }.
- */
 async function batchInsertQuestions(supabase, rows, batchSize = 10) {
   let imported = 0;
   const errors = [];
 
-  // Separa _originalNumber (para logs) e gera rows limpas para o Supabase
   const meta = rows.map(({ _originalNumber, ...rest }) => ({ _originalNumber, clean: rest }));
 
   for (let i = 0; i < meta.length; i += batchSize) {
@@ -300,7 +304,6 @@ async function batchInsertQuestions(supabase, rows, batchSize = 10) {
     const { data, error } = await supabase.from('questions').insert(batchClean).select();
 
     if (error) {
-      // Tenta inserir uma a uma para identificar qual falhou
       for (let j = 0; j < batchMeta.length; j++) {
         const { _originalNumber, clean } = batchMeta[j];
         const { error: singleErr } = await supabase.from('questions').insert(clean);
@@ -324,9 +327,8 @@ app.post('/api/import-pdf', upload.fields([
   { name: 'pdf', maxCount: 1 },
   { name: 'gabarito', maxCount: 1 },
 ]), async (req, res) => {
-  // 1. Aumentar timeouts (5 minutos)
-  req.setTimeout(300000);
-  res.setTimeout(300000);
+  req.setTimeout(600000); // 10 minutos (retry pode demorar)
+  res.setTimeout(600000);
 
   const jobId = uuidv4();
   const pdfFile = req.files?.pdf?.[0];
@@ -336,7 +338,6 @@ app.post('/api/import-pdf', upload.fields([
     return res.status(400).json({ success: false, error: 'Arquivos PDF e Gabarito são obrigatórios' });
   }
 
-  // Inicializa job
   importJobs[jobId] = {
     id: jobId,
     status: 'processing',
@@ -345,183 +346,169 @@ app.post('/api/import-pdf', upload.fields([
     success: false
   };
 
-  // Responde imediatamente com 202 Accepted
   res.status(202).json({ success: true, jobId, message: 'Processamento iniciado em segundo plano' });
 
-  // Inicia processamento em background (async)
   (async () => {
     const startTime = Date.now();
     try {
       console.log(`\n🚀 [Job ${jobId}] Iniciando processamento background...`);
+      console.log('\n📄 ═══════════════════════════════════════════════════════');
+      console.log('   IMPORTAÇÃO DE PDF INICIADA');
+      console.log('═══════════════════════════════════════════════════════\n');
+      console.log(`  📁 Prova:     ${pdfFile.originalname} (${(pdfFile.size / 1024 / 1024).toFixed(2)} MB)`);
+      console.log(`  📁 Gabarito:  ${gabaritoFile.originalname} (${(gabaritoFile.size / 1024 / 1024).toFixed(2)} MB)\n`);
 
-    console.log('\n📄 ═══════════════════════════════════════════════════════');
-    console.log('   IMPORTAÇÃO DE PDF INICIADA');
-    console.log('═══════════════════════════════════════════════════════\n');
-    console.log(`  📁 Prova:     ${pdfFile.originalname} (${(pdfFile.size / 1024 / 1024).toFixed(2)} MB)`);
-    console.log(`  📁 Gabarito:  ${gabaritoFile.originalname} (${(gabaritoFile.size / 1024 / 1024).toFixed(2)} MB)\n`);
+      // ── 1. Extrair gabarito ────────────────────────────────────────────────────
+      console.log('  📖 Extraindo texto do PDF do gabarito...');
+      const gabaritoData = await pdfParse(gabaritoFile.buffer);
+      const gabaritoText = gabaritoData.text;
 
-    // ── 1b. Extrair gabarito do PDF via Claude ─────────────────────────────────
-    console.log('  📖 Extraindo texto do PDF do gabarito...');
-    const gabaritoData = await pdfParse(gabaritoFile.buffer);
-    const gabaritoText = gabaritoData.text;
+      if (!gabaritoText || gabaritoText.trim().length < 10) {
+        throw new Error('PDF do gabarito parece estar vazio ou conter muito pouco texto.');
+      }
+      console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
 
-    if (!gabaritoText || gabaritoText.trim().length < 10) {
-      throw new Error('PDF do gabarito parece estar vazio ou conter muito pouco texto.');
-    }
-    console.log(`  ✅ Texto do gabarito extraído: ${gabaritoText.length} caracteres\n`);
-
-    console.log('  🤖 Enviando gabarito para Anthropic para extração...');
-    const gabaritoRaw = await callAnthropic(
-      `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
-      '',
-      500
-    );
-    let gabarito;
-    try {
-      gabarito = JSON.parse(cleanJSON(gabaritoRaw));
-    } catch {
-      console.error('  ❌ Erro ao parsear gabarito:', gabaritoRaw.substring(0, 300));
-      return res.status(500).json({
-        success: false,
-        error: 'Falha ao extrair gabarito do PDF. O Claude não retornou um JSON válido.',
-        rawPreview: gabaritoRaw.substring(0, 500),
-      });
-    }
-
-    if (typeof gabarito !== 'object' || Array.isArray(gabarito) || Object.keys(gabarito).length === 0) {
-      throw new Error('Gabarito extraído está vazio ou em formato inválido.');
-    }
-
-    console.log(`  ✅ Gabarito extraído: ${Object.keys(gabarito).length} respostas\n`);
-
-    // ── 2. Extrair texto do PDF ────────────────────────────────────────────────
-    console.log('  📖 Extraindo texto do PDF...');
-    const pdfData = await pdfParse(pdfFile.buffer);
-    const pdfText = pdfData.text;
-
-    if (!pdfText || pdfText.trim().length < 100) {
-      throw new Error('PDF parece estar vazio ou conter muito pouco texto.');
-    }
-
-    console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
-
-    // ── 3. Dividir em 6 blocos (por caracteres) e enviar para Anthropic ────────
-    const totalLen = pdfText.length;
-    const partSize = Math.ceil(totalLen / 10);
-    const chunks = [];
-    for (let i = 0; i < 10; i++) {
-      chunks.push(pdfText.slice(partSize * i, partSize * (i + 1)));
-    }
-
-    console.log(`  📦 Texto dividido em ${chunks.length} bloco(s) de ~${partSize} chars para extração.\n`);
-
-    let allExtractedQuestions = [];
-    let year = null;
-    let caderno = null;
-
-    for (let i = 0; i < chunks.length; i++) {
-      await new Promise(r => setTimeout(r, 10000));
-      console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length} com Google (Gemini)...`);
-      
-      const rawResponse = await callAnthropic(
-        `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i+1}/${chunks.length}):\n\n${chunks[i]}`,
-        ENEM_EXTRACTION_SYSTEM_PROMPT,
-        4000
+      console.log('  🤖 Enviando gabarito para extração...');
+      const gabaritoRaw = await callAnthropic(
+        `Extraia o gabarito deste PDF e retorne APENAS um JSON no formato:\n{"1":"C","2":"A","3":"B",...}\nonde a chave é o número da questão e o valor é a letra da resposta correta.\nSem markdown, sem explicações, só o JSON.\n\nTexto do gabarito:\n\n${gabaritoText}`,
+        '',
+        500
       );
 
+      let gabarito;
       try {
-        const parsedData = JSON.parse(cleanJSON(rawResponse));
-        if (parsedData.questions && Array.isArray(parsedData.questions)) {
-          allExtractedQuestions = allExtractedQuestions.concat(parsedData.questions);
-          // Captura metadados do primeiro bloco que contiver
-          if (!year) year = parsedData.year;
-          if (!caderno) caderno = parsedData.caderno;
-          console.log(`     ✅ Bloco ${i + 1}: ${parsedData.questions.length} questões extraídas.`);
+        gabarito = JSON.parse(cleanJSON(gabaritoRaw));
+      } catch {
+        console.error('  ❌ Erro ao parsear gabarito:', gabaritoRaw.substring(0, 300));
+        throw new Error('Falha ao extrair gabarito do PDF. O modelo não retornou um JSON válido.');
+      }
+
+      if (typeof gabarito !== 'object' || Array.isArray(gabarito) || Object.keys(gabarito).length === 0) {
+        throw new Error('Gabarito extraído está vazio ou em formato inválido.');
+      }
+
+      console.log(`  ✅ Gabarito extraído: ${Object.keys(gabarito).length} respostas\n`);
+
+      // ── 2. Extrair texto da prova ──────────────────────────────────────────────
+      console.log('  📖 Extraindo texto do PDF da prova...');
+      const pdfData = await pdfParse(pdfFile.buffer);
+      const pdfText = pdfData.text;
+
+      if (!pdfText || pdfText.trim().length < 100) {
+        throw new Error('PDF parece estar vazio ou conter muito pouco texto.');
+      }
+
+      console.log(`  ✅ Texto extraído: ${pdfText.length} caracteres, ${pdfData.numpages} páginas\n`);
+
+      // ── 3. Dividir em 10 blocos e processar ───────────────────────────────────
+      const totalLen = pdfText.length;
+      const NUM_CHUNKS = 10;
+      const partSize = Math.ceil(totalLen / NUM_CHUNKS);
+      const chunks = [];
+      for (let i = 0; i < NUM_CHUNKS; i++) {
+        chunks.push(pdfText.slice(partSize * i, partSize * (i + 1)));
+      }
+
+      console.log(`  📦 Texto dividido em ${chunks.length} blocos de ~${partSize} chars.\n`);
+
+      let allExtractedQuestions = [];
+      let year = null;
+      let caderno = null;
+
+      for (let i = 0; i < chunks.length; i++) {
+        console.log(`  🤖 Processando bloco ${i + 1}/${chunks.length}...`);
+
+        const rawResponse = await callAnthropic(
+          `Extraia as questões do seguinte bloco de texto bruto de prova do ENEM (Parte ${i + 1}/${chunks.length}):\n\n${chunks[i]}`,
+          ENEM_EXTRACTION_SYSTEM_PROMPT,
+          4000
+        );
+
+        try {
+          const parsedData = JSON.parse(cleanJSON(rawResponse));
+          if (parsedData.questions && Array.isArray(parsedData.questions)) {
+            allExtractedQuestions = allExtractedQuestions.concat(parsedData.questions);
+            if (!year) year = parsedData.year;
+            if (!caderno) caderno = parsedData.caderno;
+            console.log(`     ✅ Bloco ${i + 1}: ${parsedData.questions.length} questões extraídas.`);
+          }
+        } catch (parseErr) {
+          console.error(`  ❌ Erro ao parsear bloco ${i + 1}:`, parseErr.message);
         }
-      } catch (parseErr) {
-        console.error(`  ❌ Erro ao parsear bloco ${i + 1}:`, parseErr.message);
-        // Continua para o próximo bloco mesmo se um falhar
-      }
-    }
-
-    if (allExtractedQuestions.length === 0) {
-      throw new Error('Não foi possível extrair nenhuma questão da prova.');
-    }
-
-    const extractedQuestions = allExtractedQuestions;
-
-    console.log(`  📋 Questões extraídas: ${extractedQuestions.length}`);
-    console.log(`  📅 Ano: ${year} | Caderno: ${caderno}\n`);
-
-    // ── 5. Aplicar gabarito e montar registros para o Supabase ──────────────────
-    console.log('  🔑 Aplicando gabarito às questões...\n');
-    const supabaseRows = [];
-    let skipped = 0;
-
-    for (const q of extractedQuestions) {
-      const num = String(q.number);
-      const gabaritoLetter = gabarito[num]?.toUpperCase();
-      const idx = LETTER_TO_INDEX[gabaritoLetter];
-
-      let correctAnswer = '';
-      if (idx !== undefined && q.options && q.options[idx]) {
-        correctAnswer = q.options[idx];
-      } else if (gabaritoLetter) {
-        console.warn(`  ⚠️  Questão ${num}: letra "${gabaritoLetter}" sem correspondência nas opções`);
       }
 
-      console.log(`  Importando questão ${num}/${extractedQuestions.length}...`);
+      if (allExtractedQuestions.length === 0) {
+        throw new Error('Não foi possível extrair nenhuma questão da prova.');
+      }
 
-      supabaseRows.push({
-        statement: q.statement || '',
-        comando_questao: q.comandoQuestao || '',
-        options: q.options || [],
-        correct_answer: correctAnswer,
-        explanation: q.explanation || '',
-        subject: q.subject || 'Interdisciplinar',
-        sub_area: q.source || (year ? `ENEM ${year}` : ''),
-        difficulty: q.difficulty || 'Médio',
-        image_url: '',
-        _originalNumber: Number(num), // campo auxiliar, removido dentro de batchInsertQuestions
-      });
+      console.log(`\n  📋 Total de questões extraídas: ${allExtractedQuestions.length}`);
+      console.log(`  📅 Ano: ${year} | Caderno: ${caderno}\n`);
+
+      // ── 4. Aplicar gabarito ────────────────────────────────────────────────────
+      console.log('  🔑 Aplicando gabarito às questões...\n');
+      const supabaseRows = [];
+      let skipped = 0;
+
+      for (const q of allExtractedQuestions) {
+        const num = String(q.number);
+        const gabaritoLetter = gabarito[num]?.toUpperCase();
+        const idx = LETTER_TO_INDEX[gabaritoLetter];
+
+        let correctAnswer = '';
+        if (idx !== undefined && q.options && q.options[idx]) {
+          correctAnswer = q.options[idx];
+        } else if (gabaritoLetter) {
+          console.warn(`  ⚠️  Questão ${num}: letra "${gabaritoLetter}" sem correspondência nas opções`);
+        }
+
+        supabaseRows.push({
+          statement: q.statement || '',
+          comando_questao: q.comandoQuestao || '',
+          options: q.options || [],
+          correct_answer: correctAnswer,
+          explanation: q.explanation || '',
+          subject: q.subject || 'Interdisciplinar',
+          sub_area: q.source || (year ? `ENEM ${year}` : ''),
+          difficulty: q.difficulty || 'Médio',
+          image_url: '',
+          _originalNumber: Number(num),
+        });
+      }
+
+      // ── 5. Inserir no Supabase ─────────────────────────────────────────────────
+      console.log(`\n  💾 Inserindo ${supabaseRows.length} questões no Supabase...\n`);
+      const supabase = getSupabase();
+      const { imported, errors } = await batchInsertQuestions(supabase, supabaseRows, 10);
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log('\n═══════════════════════════════════════════════════════');
+      console.log(`  ✅ IMPORTAÇÃO CONCLUÍDA em ${elapsed}s`);
+      console.log(`     Importadas: ${imported} | Puladas: ${skipped} | Erros: ${errors.length}`);
+      console.log('═══════════════════════════════════════════════════════\n');
+
+      importJobs[jobId] = {
+        ...importJobs[jobId],
+        status: 'completed',
+        success: true,
+        imported,
+        skipped,
+        year,
+        caderno,
+        errors,
+        elapsedTime: elapsed
+      };
+    } catch (err) {
+      console.error(`  ❌ [Job ${jobId}] Erro fatal:`, err);
+      importJobs[jobId] = {
+        ...importJobs[jobId],
+        status: 'failed',
+        error: err.message || 'Erro interno no servidor'
+      };
     }
-
-    // ── 6. Inserir no Supabase em lotes ────────────────────────────────────────
-    console.log(`\n  💾 Inserindo ${supabaseRows.length} questões no Supabase (lotes de 10)...\n`);
-    const supabase = getSupabase();
-    const { imported, errors } = await batchInsertQuestions(supabase, supabaseRows, 10);
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log('\n═══════════════════════════════════════════════════════');
-    console.log(`  ✅ IMPORTAÇÃO CONCLUÍDA em ${elapsed}s`);
-    console.log(`     Importadas: ${imported} | Puladas: ${skipped} | Erros: ${errors.length}`);
-    console.log('═══════════════════════════════════════════════════════\n');
-
-    // ── 7. Finalizar Job ───────────────────────────────────────────────────────
-    importJobs[jobId] = {
-      ...importJobs[jobId],
-      status: 'completed',
-      success: true,
-      imported,
-      skipped,
-      year,
-      caderno,
-      errors,
-      elapsedTime: elapsed
-    };
-  } catch (err) {
-    console.error(`  ❌ [Job ${jobId}] Erro fatal:`, err);
-    importJobs[jobId] = {
-      ...importJobs[jobId],
-      status: 'failed',
-      error: err.message || 'Erro interno no servidor'
-    };
-  }
-})();
+  })();
 });
 
-// ─── Catch-all (deve ser a ÚLTIMA rota) ───────────────────────────────────────
-
+// ─── Catch-all ────────────────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
